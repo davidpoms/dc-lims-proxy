@@ -8,32 +8,28 @@ export default async function handler(req, res) {
   }
 
   const { limit = 20 } = req.query;
+  const apiKey = process.env.SCRAPINGBEE_API_KEY;
+
+  if (!apiKey) {
+    return res.status(500).json({ 
+      success: false,
+      error: 'ScrapingBee API key not configured' 
+    });
+  }
 
   try {
-    // Step 1: Get the initial page to extract ViewState and other form data
-    const initialResponse = await fetch('https://www.dcregs.dc.gov/Common/DCR/Issues/IssueCategoryList.aspx', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
+    // Use ScrapingBee to render JavaScript
+    const targetUrl = 'https://www.dcregs.dc.gov/Common/DCR/IssueList.aspx';
+    const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${apiKey}&url=${encodeURIComponent(targetUrl)}&render_js=true&wait=2000`;
     
-    const initialHtml = await initialResponse.text();
+    const response = await fetch(scrapingBeeUrl);
     
-    // Extract ViewState and other ASP.NET form fields
-    const viewState = extractFormField(initialHtml, '__VIEWSTATE');
-    const viewStateGenerator = extractFormField(initialHtml, '__VIEWSTATEGENERATOR');
-    const eventValidation = extractFormField(initialHtml, '__EVENTVALIDATION');
+    if (!response.ok) {
+      throw new Error(`ScrapingBee error: ${response.status}`);
+    }
     
-    // Try to get the latest issue directly
-    // Look for the most recent issue in the DC Register
-    const issueListResponse = await fetch('https://www.dcregs.dc.gov/Common/DCR/IssueList.aspx', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      }
-    });
-    
-    const issueListHtml = await issueListResponse.text();
-    const regulations = parseIssueList(issueListHtml);
+    const html = await response.text();
+    const regulations = parseRegulations(html);
 
     return res.status(200).json({ 
       success: true,
@@ -41,7 +37,7 @@ export default async function handler(req, res) {
       regulations: regulations.slice(0, parseInt(limit)),
       metadata: {
         scrapedAt: new Date().toISOString(),
-        source: 'DC Register Issue List'
+        source: 'DC Register via ScrapingBee'
       }
     });
     
@@ -55,122 +51,87 @@ export default async function handler(req, res) {
   }
 }
 
-function extractFormField(html, fieldName) {
-  const pattern = new RegExp(`<input[^>]*name="${fieldName}"[^>]*value="([^"]*)"`, 'i');
-  const match = html.match(pattern);
-  return match ? match[1] : '';
-}
-
-function parseIssueList(html) {
+function parseRegulations(html) {
   const regulations = [];
   
-  // Look for issue links - format like "Volume 73, Issue 2 - January 09, 2026"
-  const issuePattern = /Volume\s+(\d+),\s+Issue\s+(\d+)\s+-\s+([^<\n]+)/gi;
+  // Look for issue links in the rendered HTML
+  const issuePattern = /<a[^>]*href="([^"]*IssueDetailPage[^"]*)"[^>]*>([^<]*Volume[^<]*)<\/a>/gi;
   let match;
   
-  const issues = [];
   while ((match = issuePattern.exec(html)) !== null) {
-    issues.push({
-      volume: match[1],
-      issue: match[2],
-      date: match[3].trim()
-    });
-  }
-  
-  // Look for links to issue detail pages
-  const linkPattern = /<a[^>]*href="([^"]*IssueDetailPage[^"]*issueID=(\d+)[^"]*)"/gi;
-  const issueLinks = [];
-  
-  while ((match = linkPattern.exec(html)) !== null) {
-    issueLinks.push({
-      url: match[1],
-      issueId: match[2]
-    });
-  }
-  
-  // For each recent issue, create a regulation entry
-  for (let i = 0; i < Math.min(issues.length, 5); i++) {
-    const issue = issues[i];
-    const link = issueLinks[i];
+    const url = match[1];
+    const text = match[2].trim();
     
-    regulations.push({
-      id: `ISSUE-${issue.volume}-${issue.issue}`,
-      title: `DC Register Volume ${issue.volume}, Issue ${issue.issue}`,
-      agency: 'Office of Documents and Administrative Issuances',
-      category: 'DC Register Issue',
-      status: 'Published',
-      registerIssue: `${issue.volume}/${issue.issue}`,
-      date: parseDate(issue.date),
-      detailLink: link ? `https://www.dcregs.dc.gov/Common/DCR/Issues/${link.url}` : null,
-      source: 'Municipal Register',
-      isNew: isWithinDays(parseDate(issue.date), 7)
-    });
-  }
-  
-  // Also try to find individual notice references
-  const noticePattern = /<a[^>]*href="[^"]*NoticeId=(N\d+)[^"]*"[^>]*>([^<]*)<\/a>/gi;
-  while ((match = noticePattern.exec(html)) !== null) {
-    const noticeId = match[1];
-    const title = match[2].trim() || 'Regulation Notice';
+    // Extract volume, issue, and date
+    const volMatch = text.match(/Volume\s+(\d+)/i);
+    const issueMatch = text.match(/Issue\s+(\d+)/i);
+    const dateMatch = text.match(/(\w+\s+\d+,\s+\d{4})/);
     
-    if (title.length > 10) { // Only add if we have a meaningful title
+    if (volMatch && issueMatch) {
       regulations.push({
-        id: noticeId,
-        title: title,
-        agency: extractAgency(title),
-        category: 'Rulemaking',
+        id: `VOL${volMatch[1]}-ISS${issueMatch[1]}`,
+        title: text,
+        agency: 'Office of Documents and Administrative Issuances',
+        category: 'DC Register Issue',
         status: 'Published',
-        date: new Date().toISOString().split('T')[0],
-        detailLink: `https://dcregs.dc.gov/Common/NoticeDetail.aspx?NoticeId=${noticeId}`,
+        registerIssue: `${volMatch[1]}/${issueMatch[1]}`,
+        date: dateMatch ? parseDate(dateMatch[1]) : new Date().toISOString().split('T')[0],
+        detailLink: url.startsWith('http') ? url : `https://www.dcregs.dc.gov/Common/DCR/Issues/${url}`,
         source: 'Municipal Register',
-        isNew: true
+        isNew: dateMatch ? isWithinDays(parseDate(dateMatch[1]), 7) : false
       });
     }
+  }
+  
+  // Also look for notice entries in table format
+  const noticePattern = /<tr[^>]*>[\s\S]*?<a[^>]*NoticeId=(N\d+)[^>]*>[\s\S]*?lblSubject[^>]*>([^<]+)<\/span>[\s\S]*?<\/tr>/gi;
+  
+  while ((match = noticePattern.exec(html)) !== null) {
+    const noticeId = match[1];
+    const subject = match[2].trim();
+    
+    regulations.push({
+      id: noticeId,
+      title: subject,
+      agency: extractAgency(subject),
+      category: 'Rulemaking',
+      status: 'Published',
+      date: new Date().toISOString().split('T')[0],
+      detailLink: `https://dcregs.dc.gov/Common/NoticeDetail.aspx?NoticeId=${noticeId}`,
+      source: 'Municipal Register',
+      isNew: true
+    });
   }
   
   return regulations;
 }
 
 function parseDate(dateString) {
-  if (!dateString) return new Date().toISOString().split('T')[0];
-  
   try {
-    // Handle formats like "January 09, 2026"
-    const date = new Date(dateString);
-    return date.toISOString().split('T')[0];
+    return new Date(dateString).toISOString().split('T')[0];
   } catch (e) {
     return new Date().toISOString().split('T')[0];
   }
 }
 
 function extractAgency(text) {
-  if (!text) return 'Unknown Agency';
-  
   const agencies = [
     'Alcoholic Beverage and Cannabis Administration',
     'Department of Health',
     'Department of Transportation',
     'Department of Energy and Environment',
-    'Department of Housing and Community Development',
-    'Office of the Chief Financial Officer',
-    'Metropolitan Police Department',
-    'Fire and Emergency Medical Services Department',
-    'Office of Documents and Administrative Issuances'
+    'Department of Housing and Community Development'
   ];
   
   for (const agency of agencies) {
     if (text.includes(agency)) return agency;
   }
   
-  const match = text.match(/^([^-]+(?:Department|Office|Administration|Agency|Board|Commission))/i);
-  if (match) return match[1].trim();
-  
-  const dashMatch = text.match(/^([^-]+)/);
-  return dashMatch ? dashMatch[1].trim() : 'DC Government';
+  const match = text.match(/^([^-]+)/);
+  return match ? match[1].trim() : 'DC Government';
 }
 
 function isWithinDays(dateString, days) {
-  if (!dateString) return false;
   try {
     const date = new Date(dateString);
     const now = new Date();
