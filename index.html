@@ -144,7 +144,9 @@
                     const allLegislation = [];
                     const seenIds = new Set();
                     
-                    results.forEach(result => {
+                    results.forEach((result, index) => {
+                        console.log(`Processing result ${index}:`, result);
+                        
                         // Handle both array and object responses
                         let legislation = [];
                         if (Array.isArray(result)) {
@@ -155,8 +157,11 @@
                             legislation = result.results;
                         }
                         
+                        console.log(`Found ${legislation.length} items in result ${index}`);
+                        
                         legislation.forEach(leg => {
                             if (leg && leg.legislationNumber && !seenIds.has(leg.legislationNumber)) {
+                                console.log(`Adding ${leg.legislationNumber}, committees: "${leg.referredToCommittees}"`);
                                 seenIds.add(leg.legislationNumber);
                                 allLegislation.push(leg);
                             }
