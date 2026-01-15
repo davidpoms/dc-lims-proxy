@@ -145,14 +145,22 @@
                     const seenIds = new Set();
                     
                     results.forEach(result => {
-                        if (result && result.legislationSearchResults) {
-                            result.legislationSearchResults.forEach(leg => {
-                                if (!seenIds.has(leg.legislationNumber)) {
-                                    seenIds.add(leg.legislationNumber);
-                                    allLegislation.push(leg);
-                                }
-                            });
+                        // Handle both array and object responses
+                        let legislation = [];
+                        if (Array.isArray(result)) {
+                            legislation = result;
+                        } else if (result && result.legislationSearchResults) {
+                            legislation = result.legislationSearchResults;
+                        } else if (result && Array.isArray(result.results)) {
+                            legislation = result.results;
                         }
+                        
+                        legislation.forEach(leg => {
+                            if (leg && leg.legislationNumber && !seenIds.has(leg.legislationNumber)) {
+                                seenIds.add(leg.legislationNumber);
+                                allLegislation.push(leg);
+                            }
+                        });
                     });
 
                     console.log('Total unique legislation found:', allLegislation.length);
