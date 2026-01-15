@@ -1,17 +1,14 @@
-// api/lims-proxy.js
 export default async function handler(req, res) {
-  // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // Handle preflight request
   if (req.method === 'OPTIONS') {
     res.status(200).end();
     return;
   }
 
-  const { endpoint, method = 'GET', body } = req.body || req.query;
+  const { endpoint, method = 'GET', body } = req.method === 'POST' ? req.body : req.query;
 
   if (!endpoint) {
     return res.status(400).json({ error: 'Endpoint parameter required' });
