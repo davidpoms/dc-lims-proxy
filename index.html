@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DC Policy Tracker</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body>
     <div id="root"></div>
@@ -86,12 +86,9 @@
                     if (body) params.append('body', JSON.stringify(body));
                     
                     const url = `${PROXY_URL}?${params.toString()}`;
-                    console.log('Fetching from proxy:', url);
                     
                     const response = await fetch(url);
                     const data = await response.json();
-                    
-                    console.log('Proxy response:', data);
                     
                     if (data.error) throw new Error(data.error);
                     return data;
@@ -123,8 +120,6 @@
                 setError(null);
                 
                 try {
-                    console.log('Starting search with council period:', selectedPeriod.councilPeriodId);
-                    
                     const searchPromises = trackedKeywords.map(keyword =>
                         proxyFetch('/SearchLegislation', 'POST', {
                             Keyword: keyword,
@@ -134,67 +129,49 @@
                             OffSet: 0
                         }).catch(err => {
                             console.error(`Error searching for "${keyword}":`, err);
-                            return { legislationSearchResults: [] };
+                            return [];
                         })
                     );
 
                     const results = await Promise.all(searchPromises);
-                    console.log('Search results:', results);
                     
                     const allLegislation = [];
                     const seenIds = new Set();
                     
-                    results.forEach((result, index) => {
-                        console.log(`Processing result ${index}:`, result);
-                        
-                        // Handle both array and object responses
-                        let legislation = [];
-                        if (Array.isArray(result)) {
-                            legislation = result;
-                        } else if (result && result.legislationSearchResults) {
-                            legislation = result.legislationSearchResults;
-                        } else if (result && Array.isArray(result.results)) {
-                            legislation = result.results;
-                        }
-                        
-                        console.log(`Found ${legislation.length} items in result ${index}`);
+                    results.forEach(result => {
+                        const legislation = Array.isArray(result) ? result : [];
                         
                         legislation.forEach(leg => {
                             if (leg && leg.legislationNumber && !seenIds.has(leg.legislationNumber)) {
-                                console.log(`Adding ${leg.legislationNumber}, committees: "${leg.referredToCommittees}"`);
                                 seenIds.add(leg.legislationNumber);
                                 allLegislation.push(leg);
                             }
                         });
                     });
 
-                    console.log('Total unique legislation found:', allLegislation.length);
-                    
-                    // Debug: Log first item structure
-                    if (allLegislation.length > 0) {
-                        console.log('Sample legislation item from allLegislation:', allLegislation[0]);
-                        console.log('referredToCommittees value:', allLegislation[0].referredToCommittees);
-                        console.log('Type:', typeof allLegislation[0].referredToCommittees);
-                    }
+                    const transformedItems = allLegislation.map(leg => {
+                        const committeeStr = leg.referredToCommittees;
+                        let committees = [];
+                        
+                        if (committeeStr && committeeStr !== 'null' && typeof committeeStr === 'string' && committeeStr.trim()) {
+                            committees = [committeeStr];
+                        }
+                        
+                        return {
+                            id: leg.legislationNumber,
+                            title: leg.title,
+                            billNumber: leg.legislationNumber,
+                            category: leg.category || leg.subCategory || 'Uncategorized',
+                            status: leg.status || 'Unknown',
+                            committees: committees,
+                            date: leg.introductionDate ? new Date(leg.introductionDate).toISOString().split('T')[0] : '',
+                            description: leg.shortDescription || leg.title,
+                            link: leg.introductionDocumentURL || `https://lims.dccouncil.gov/Legislation/${leg.legislationNumber}`,
+                            source: 'DC Council',
+                            isNew: isNewItem(leg.introductionDate)
+                        };
+                    });
 
-                    const transformedItems = allLegislation.map(leg => ({
-                        id: leg.legislationNumber,
-                        title: leg.title,
-                        billNumber: leg.legislationNumber,
-                        category: leg.legislationCategoryName || leg.category || 'Uncategorized',
-                        status: leg.currentStatus || leg.status || 'Unknown',
-                        committees: leg.introCommittee ? [leg.introCommittee] : (leg.committees || []),
-                        date: leg.introductionDate ? new Date(leg.introductionDate).toISOString().split('T')[0] : '',
-                        description: leg.shortTitle || leg.description || leg.title,
-                        link: `https://lims.dccouncil.gov/Legislation/${leg.legislationNumber}`,
-                        source: 'DC Council',
-                        isNew: isNewItem(leg.introductionDate || leg.date)
-                    }));
-
-                    console.log('Transformed items:', transformedItems.length);
-                    if (transformedItems.length > 0) {
-                        console.log('Sample transformed item:', transformedItems[0]);
-                    }
                     setItems(transformedItems);
                     setLoading(false);
                 } catch (err) {
@@ -263,7 +240,7 @@
                     description: manualEntry.title,
                     link: manualEntry.link,
                     source: 'Municipal Register',
-                    isNew: isWithinDays(manualEntry.date, 7),
+                    isNew: isNewItem(manualEntry.date),
                     committees: []
                 };
 
@@ -279,8 +256,10 @@
             };
 
             const exportToCSV = () => {
+                const itemsToExport = filteredItems;
+
                 const headers = ['Title', 'Bill Number', 'Category', 'Status', 'Committees', 'Date', 'Link', 'Notes', 'Action Required'];
-                const rows = filteredItems.map(item => [
+                const rows = itemsToExport.map(item => [
                     item.title,
                     item.billNumber || '',
                     item.category,
@@ -294,8 +273,8 @@
 
                 const csvContent = [
                     headers.join(','),
-                    ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
-                ].join('\\n');
+                    ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+                ].join('\n');
 
                 const blob = new Blob([csvContent], { type: 'text/csv' });
                 const url = window.URL.createObjectURL(blob);
@@ -330,7 +309,13 @@
                                     <h1 className="text-3xl font-bold text-gray-900">DC Policy Tracker</h1>
                                     <p className="text-gray-600">Legislative Monitoring System</p>
                                 </div>
-                                <div className="flex gap-2">
+                                <div className="flex gap-2 flex-wrap">
+                                    <button
+                                        onClick={() => setShowManualEntry(true)}
+                                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                                    >
+                                        + Add DC Register
+                                    </button>
                                     <button
                                         onClick={exportToCSV}
                                         className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
@@ -355,7 +340,7 @@
 
                             {selectedPeriod && (
                                 <div className="text-sm text-gray-600">
-                                    Council Period: <strong>{selectedPeriod.councilPeriod}</strong> | 
+                                    Council Period: <strong>{selectedPeriod.councilPeriod}</strong>
                                     {selectedItems.size > 0 && <span className="ml-2 px-2 py-1 bg-indigo-100 text-indigo-700 rounded">{selectedItems.size} items need action</span>}
                                 </div>
                             )}
@@ -463,7 +448,7 @@
                                                         className="mt-1"
                                                     />
                                                     <div className="flex-1">
-                                                        <div className="flex items-center gap-2 mb-1">
+                                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                                                             {item.isNew && (
                                                                 <span className="px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded">
                                                                     NEW
@@ -487,8 +472,8 @@
                                                             <div className="mb-2">
                                                                 <div className="text-xs font-semibold mb-1">Committees:</div>
                                                                 <div className="flex flex-wrap gap-1">
-                                                                    {item.committees.map(com => (
-                                                                        <span key={com} className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded">
+                                                                    {item.committees.map((com, idx) => (
+                                                                        <span key={`${item.id}-${idx}`} className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded">
                                                                             {com}
                                                                         </span>
                                                                     ))}
@@ -514,7 +499,7 @@
                                                         )}
 
                                                         <div className="flex items-center justify-between mt-2">
-                                                            <div className="flex items-center gap-4 text-xs text-gray-500">
+                                                            <div className="flex items-center gap-2 text-xs text-gray-500 flex-wrap">
                                                                 <span className="px-2 py-1 bg-indigo-100 text-indigo-700 rounded">{item.category}</span>
                                                                 <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded">{item.status}</span>
                                                                 <span>{item.date}</span>
@@ -540,7 +525,7 @@
                     </div>
 
                     {showAddKeyword && (
-                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
                             <div className="bg-white rounded-lg p-6 max-w-md w-full">
                                 <h3 className="text-xl font-semibold mb-4">Add Keyword</h3>
                                 <input
@@ -574,7 +559,7 @@
                     )}
 
                     {editingNote && (
-                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
                             <div className="bg-white rounded-lg p-6 max-w-2xl w-full">
                                 <h3 className="text-xl font-semibold mb-4">Add Note</h3>
                                 <textarea
@@ -607,7 +592,7 @@
 
                     {showManualEntry && (
                         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                            <div className="bg-white rounded-lg p-6 max-w-2xl w-full">
+                            <div className="bg-white rounded-lg p-6 max-w-2xl w-full max-h-screen overflow-y-auto">
                                 <h3 className="text-xl font-semibold mb-4">Add DC Register Item</h3>
                                 <p className="text-sm text-gray-600 mb-4">
                                     Visit <a href="https://www.dcregs.dc.gov/" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">dcregs.dc.gov</a> to find recent regulations
