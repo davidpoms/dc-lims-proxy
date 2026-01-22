@@ -19,7 +19,7 @@
         // Initialize Supabase client
         // IMPORTANT: Replace these with your actual Supabase URL and anon key
         const SUPABASE_URL = 'https://owqylzpuxwsldepufxep.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_IWFsW7Fp1xUzKkr82yVavw_wu236ZdP'; // Get this from Supabase dashboard
+        const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY_HERE'; // Get this from Supabase dashboard
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         function DCPolicyTracker() {
@@ -882,7 +882,11 @@
                 const matchesCategory = filters.category === 'all' || item.category === filters.category;
                 const matchesAssignedTo = filters.assignedTo === 'all' || item.assignedTo === filters.assignedTo;
                 const matchesPriority = filters.priority === 'all' || item.priority === filters.priority;
-                const matchesActionStatus = filters.actionStatus === 'all' || item.actionStatus === filters.actionStatus;
+                
+                // Action status filter: only show tracked items when filtering by action status
+                const matchesActionStatus = filters.actionStatus === 'all' || 
+                    (selectedItems.has(item.id) && item.actionStatus === filters.actionStatus);
+                
                 const matchesIntroducedBy = filters.introducedBy === 'all' || item.introducedBy === filters.introducedBy;
                 return matchesKeyword && matchesCommittee && matchesCategory && matchesAssignedTo && matchesPriority && matchesActionStatus && matchesIntroducedBy;
             });
@@ -976,9 +980,37 @@
                             )}
 
                             {selectedPeriod && (
-                                <div className="text-sm text-gray-600">
-                                    Council Period: <strong>{selectedPeriod.councilPeriod}</strong>
-                                    {selectedItems.size > 0 && <span className="ml-2 px-2 py-1 bg-indigo-100 text-indigo-700 rounded">{selectedItems.size} items tracked</span>}
+                                <div className="text-sm text-gray-600 flex items-center justify-between">
+                                    <div>
+                                        Council Period: <strong>{selectedPeriod.councilPeriod}</strong>
+                                        {selectedItems.size > 0 && <span className="ml-2 px-2 py-1 bg-indigo-100 text-indigo-700 rounded">{selectedItems.size} items tracked</span>}
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => setFilters({...filters, actionStatus: 'action_needed'})}
+                                            className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
+                                        >
+                                            Show Action Needed
+                                        </button>
+                                        <button
+                                            onClick={() => setFilters({...filters, actionStatus: 'monitor_and_assess'})}
+                                            className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
+                                        >
+                                            Show Monitor & Assess
+                                        </button>
+                                        <button
+                                            onClick={() => setFilters({...filters, actionStatus: 'action_completed'})}
+                                            className="px-3 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200"
+                                        >
+                                            Show Completed
+                                        </button>
+                                        <button
+                                            onClick={() => setFilters({...filters, actionStatus: 'all'})}
+                                            className="px-3 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                                        >
+                                            Show All
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                         </div>
