@@ -774,22 +774,22 @@
             };
 
             const generateEmailBody = () => {
-                const completedItems = filteredItems.filter(item => 
+                const reportItems = filteredItems.filter(item => 
                     selectedItems.has(item.id) && 
-                    (item.actionStatus === 'action_completed' || item.actionStatus === 'monitor_and_assess')
+                    (item.actionStatus === 'action_needed' || item.actionStatus === 'monitor_and_assess')
                 );
 
-                const actionCompleted = completedItems.filter(item => item.actionStatus === 'action_completed');
-                const monitorAndAssess = completedItems.filter(item => item.actionStatus === 'monitor_and_assess');
+                const actionNeeded = reportItems.filter(item => item.actionStatus === 'action_needed');
+                const monitorAndAssess = reportItems.filter(item => item.actionStatus === 'monitor_and_assess');
 
                 let emailBody = `DC Policy Tracker - Status Update\n`;
                 emailBody += `Generated: ${new Date().toLocaleDateString()}\n\n`;
                 emailBody += `=================================================\n\n`;
 
-                if (actionCompleted.length > 0) {
-                    emailBody += `ACTION COMPLETED (${actionCompleted.length} items)\n`;
+                if (actionNeeded.length > 0) {
+                    emailBody += `ACTION NEEDED (${actionNeeded.length} items)\n`;
                     emailBody += `=================================================\n\n`;
-                    actionCompleted.forEach((item, idx) => {
+                    actionNeeded.forEach((item, idx) => {
                         emailBody += `${idx + 1}. ${item.title}\n`;
                         emailBody += `   Bill Number: ${item.billNumber || 'N/A'}\n`;
                         emailBody += `   Category: ${item.category}\n`;
@@ -820,8 +820,8 @@
                     });
                 }
 
-                if (completedItems.length === 0) {
-                    emailBody += `No items with "Action Completed" or "Monitor and Assess" status.\n`;
+                if (reportItems.length === 0) {
+                    emailBody += `No items with "Action Needed" or "Monitor and Assess" status.\n`;
                 }
 
                 return emailBody;
